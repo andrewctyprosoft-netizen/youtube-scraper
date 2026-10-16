@@ -1,0 +1,23 @@
+Start the cmd window
+1. win+x > cmd > enter
+
+Download auto caption from a youtube playlist
+F:\software\yt-dlp\ffmpeg-2025-09-04-git-2611874a50-full_build\bin\yt-dlp.exe -o "F:\software\yt-dlp\youtube_downloads\%(playlist_index&{} - |)s.%(title)s.%(ext)s" --skip-download --write-sub --write-auto-sub --sub-lang vi --convert-subs srt --batch-file "F:\software\yt-dlp\urls.txt"
+Note: to download files from your custom urls just need to replace the playlist with --batch-file "F:\software\yt-dlp\urls.txt"
+
+Download auto caption with multiple urls
+1. Save all YouTube URLs in a text file (e.g., urls.txt), with each URL on a separate line.
+2. Use the command below
+F:\software\yt-dlp\ffmpeg-2025-09-04-git-2611874a50-full_build\bin\yt-dlp.exe -o "F:\software\yt-dlp\youtube_downloads\%(title)s.%(ext)s" --write-auto-subs --sub-lang vi --skip-download --convert-subs srt --batch-file "F:\software\yt-dlp\urls.txt"
+
+Download videos from url list
+F:\software\yt-dlp\ffmpeg-2025-09-04-git-2611874a50-full_build\bin\yt-dlp.exe -o "F:\software\yt-dlp\youtube_downloads\%(title)s.%(ext)s" --ignore-errors --sleep-interval 5 --max-sleep-interval 15 --retries 10 --fragment-retries 10 --concurrent-fragments 1 --batch-file "F:\software\yt-dlp\urls.txt"
+
+Download videos from url list in mp4
+F:\software\yt-dlp\ffmpeg-2025-09-04-git-2611874a50-full_build\bin\yt-dlp.exe -o "F:\software\yt-dlp\youtube_downloads\%(title)s.%(ext)s" -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" --merge-output-format mp4 --ignore-errors --sleep-interval 5 --max-sleep-interval 15 --retries 10 --fragment-retries 10 --concurrent-fragments 1 --batch-file "F:\software\yt-dlp\urls.txt"
+
+Download videos from url list in mp3
+F:\software\yt-dlp\ffmpeg-2025-09-04-git-2611874a50-full_build\bin\yt-dlp.exe -x --audio-format mp3 --audio-quality 0 -o "F:\software\yt-dlp\youtube_downloads\%(title)s.%(ext)s" --batch-file "F:\software\yt-dlp\urls.txt"
+
+combine to srt/txt files (run it with windows command prompt win+x > cmd > enter
+python F:\Software\yt-dlp\file_combiner.py
