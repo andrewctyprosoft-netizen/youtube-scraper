@@ -58,7 +58,7 @@ class JobOptions:
     docx: DocOptions = field(default_factory=DocOptions)
     video_quality: str = "720"  # best | 1080 | 720 | 480 | 360
     numbered: bool = False
-    order: str = "list"  # list | az | za: file numbers and order in the Word/TXT/CSV files
+    order: str = "list"  # list | az | za | new | old: file numbers and order in the Word/TXT/CSV files
     reuse_cache: bool = True
     delay: float = 1.0  # seconds between videos (yt-dlp gets half of it per request)
     workers: int = 2  # parallel yt-dlp processes for transcripts / metadata
@@ -87,6 +87,7 @@ class VideoResult:
     files: list[Path] = field(default_factory=list)
     available: list[str] = field(default_factory=list)
     from_cache: bool = False
+    thumb_urls: list[str] = field(default_factory=list)  # kept when file names wait for the dates
 
 
 # ---------------------------------------------------------------- helpers
@@ -162,6 +163,7 @@ def slim_meta(info: dict) -> dict:
         "title": info.get("title"),
         "channel": info.get("channel") or info.get("uploader") or "",
         "upload_date": info.get("upload_date") or "",
+        "timestamp": info.get("timestamp") or info.get("release_timestamp"),
         "duration": info.get("duration"),
         "view_count": info.get("view_count"),
         "like_count": info.get("like_count"),
@@ -255,11 +257,31 @@ def title_sort_key(title: str) -> tuple:
     return natural_key(text), title or ""
 
 
-def file_order(titles: list[str], order: str) -> list[int]:
-    """Indices of ``titles`` in output order (``list``, ``az`` or ``za``)."""
+DATE_ORDERS = ("new", "old")
+ORDERS = ("list", "az", "za", *DATE_ORDERS)
+
+
+def upload_key(meta: dict) -> tuple[str, float]:
+    """``(YYYYMMDD, unix time)`` of a video's upload; ``("", 0)`` when unknown.
+
+    The day decides; the exact time (when YouTube gives it) orders videos of the same day.
+    """
+    return meta.get("upload_date") or "", meta.get("timestamp") or 0
+
+
+def file_order(titles: list[str], order: str, dates: list[tuple[str, float]] | None = None) -> list[int]:
+    """Indices of ``titles`` in output order (``list``, ``az``, ``za``, ``new`` or ``old``).
+
+    ``new`` / ``old`` sort by ``dates`` (see :func:`upload_key`), newest or oldest
+    first; videos without a date keep their list order at the end.
+    """
     idx = list(range(len(titles)))
     if order in ("az", "za"):
         idx.sort(key=lambda i: title_sort_key(titles[i]), reverse=(order == "za"))
+    elif order in DATE_ORDERS and dates:
+        known = [i for i in idx if dates[i][0]]
+        known.sort(key=lambda i: dates[i], reverse=(order == "new"))  # stable: same time keeps list order
+        idx = known + [i for i in idx if not dates[i][0]]
     return idx
 
 
@@ -318,6 +340,13 @@ def track_url(info: dict, code: str) -> str | None:
     return None
 
 
+def thumbnail_urls(info: dict, video_id: str) -> list[str]:
+    """JPEG thumbnail URLs from yt-dlp's info, best first."""
+    thumbs = [t for t in info.get("thumbnails") or [] if ".jpg" in (t.get("url") or "")]
+    thumbs.sort(key=lambda t: (t.get("preference") or 0, t.get("width") or 0))
+    return [t["url"] for t in reversed(thumbs)] or [f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"]
+
+
 class IncompleteInfo(Exception):
     """The info has no caption lists at all, which a timed-out request also produces."""
 
@@ -362,6 +391,8 @@ class DownloadJob:
         self._lock = threading.Lock()
         self._next_request = 0.0  # shared caption pacing / back-off clock
         self._done = 0
+        # Numbered files in upload-date order: names wait until every video's date is known.
+        self._defer_names = options.order in DATE_ORDERS and options.numbered
 
     # ---- public
 
@@ -374,13 +405,16 @@ class DownloadJob:
         self.results = [VideoResult(e) for e in self.entries]
         total = len(self.results)
         # Titles from the list (playlist/channel listing or oEmbed) decide the order, so file
-        # numbers are known before any download starts.
-        self.ordered = file_order([e.title for e in self.entries], opt.order)
-        self.rank = {i: n for n, i in enumerate(self.ordered)}
+        # numbers are known before any download starts. Upload dates come with each video's
+        # info, so a date order is settled after the info phase.
+        self._reorder([upload_key(e.extra) for e in self.entries])
         self.width = max(3, len(str(total)))
         try:
-            if opt.want_transcript or opt.save_csv or opt.want_thumbnail:
+            if opt.want_transcript or opt.save_csv or opt.want_thumbnail or self._defer_names:
                 self._metadata_phase()
+                if opt.order in DATE_ORDERS:
+                    self._reorder([upload_key(r.entry.extra) for r in self.results])
+                self._write_deferred()
             if opt.want_video or opt.want_audio:
                 self._media_phase()
             for i, r in enumerate(self.results):
@@ -389,10 +423,30 @@ class DownloadJob:
                     self._row(i)
         except Cancelled:
             self.emit("log", line="Stopped by user.")
+            if self._defer_names:  # keep what finished, in date order (thumbnails need the network)
+                self._reorder([upload_key(r.entry.extra) for r in self.results])
+                self._write_deferred(thumbnails=False)
             self._finish(total, cancelled=True)
             raise
         self._finish(total)
         return self.results
+
+    def _reorder(self, dates: list[tuple[str, float]]) -> None:
+        self.ordered = file_order([e.title for e in self.entries], self.opt.order, dates)
+        self.rank = {i: n for n, i in enumerate(self.ordered)}
+
+    def _write_deferred(self, thumbnails: bool = True) -> None:
+        """Per-video files held back by ``_defer_names``, now that the order is final."""
+        if not self._defer_names:
+            return
+        self._defer_names = False
+        for i in self.ordered:
+            r = self.results[i]
+            if r.status == "pending":
+                continue  # not reached (stopped)
+            if thumbnails and r.thumb_urls:
+                self._thumbnail(i, r, r.thumb_urls)
+            self._write_per_video(i, r)
 
     # ---- reporting
 
@@ -420,7 +474,8 @@ class DownloadJob:
             r = self.results[i]
             if self._from_cache(r):
                 r.status = "no_captions" if self.opt.want_transcript and not r.cues else "done"
-                self._write_per_video(i, r)
+                if not self._defer_names:
+                    self._write_per_video(i, r)
                 self._row(i)
                 self._tick()
             else:
@@ -463,6 +518,7 @@ class DownloadJob:
         r.meta, r.from_cache = meta, True
         if meta.get("title"):
             r.entry.title = meta["title"]
+        self._note_date(r)
         if cached:
             self._load_captions(r, cached)
         return True
@@ -538,11 +594,14 @@ class DownloadJob:
             r.meta = slim_meta(info)
             if r.meta.get("title"):
                 r.entry.title = r.meta["title"]
+            self._note_date(r)
             if self.opt.want_thumbnail:  # first: videos without captions still get one
-                self._thumbnail(i, r, info)
+                r.thumb_urls = thumbnail_urls(info, r.entry.id)
+                if not self._defer_names:
+                    self._thumbnail(i, r, r.thumb_urls)
             if self.opt.want_transcript:
                 self._captions(r, info)
-            if self.opt.want_transcript:
+            if self.opt.want_transcript and not self._defer_names:
                 self._write_per_video(i, r)
             meta_path = self.cache / f"{r.entry.id}.meta.json"
             meta_path.write_text(json.dumps(r.meta, ensure_ascii=False, indent=1), encoding="utf-8")
@@ -640,10 +699,14 @@ class DownloadJob:
         sub = self._cached_sub(vid, code)
         return sub.read_text(encoding="utf-8", errors="replace") if sub else None
 
-    def _thumbnail(self, i: int, r: VideoResult, info: dict) -> None:
-        thumbs = [t for t in info.get("thumbnails") or [] if ".jpg" in (t.get("url") or "")]
-        thumbs.sort(key=lambda t: (t.get("preference") or 0, t.get("width") or 0))
-        urls = [t["url"] for t in reversed(thumbs)] or [f"https://i.ytimg.com/vi/{r.entry.id}/hqdefault.jpg"]
+    @staticmethod
+    def _note_date(r: VideoResult) -> None:
+        """Copy the upload date onto the entry, so the list window can sort and show it."""
+        if r.meta.get("upload_date"):
+            r.entry.extra["upload_date"] = r.meta["upload_date"]
+            r.entry.extra["timestamp"] = r.meta.get("timestamp") or 0
+
+    def _thumbnail(self, i: int, r: VideoResult, urls: list[str]) -> None:
         folder = self.opt.out_dir / self.opt.folders["thumbnails"]
         if any(f.parent == folder for f in r.files):
             return  # already saved in an earlier pass
@@ -679,7 +742,7 @@ class DownloadJob:
         result.blocks = cap.transcript_blocks(result.cues, layout=opt.layout, timestamps=opt.timestamps)
 
     def _media_prefix(self, i: int) -> str:
-        """``007 - `` = position in the chosen order (list, A→Z or Z→A)."""
+        """``007 - `` = position in the chosen order (list, A→Z, Z→A, newest or oldest first)."""
         if not self.opt.numbered:
             return ""
         return f"{self.rank.get(i, i) + 1:0{getattr(self, 'width', 3)}d} - "

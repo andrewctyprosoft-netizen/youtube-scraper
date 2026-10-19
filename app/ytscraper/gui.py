@@ -23,13 +23,16 @@ from .docx_export import DocOptions
 from .engine import Auth, Cancelled, Engine, EngineError, Entry, Tools, oembed_title
 from .i18n import CAPTION_LANGUAGES, set_language, t
 from .jobs import (
+    ORDERS,
     DownloadJob,
     FileJobOptions,
     JobOptions,
     combine_files,
+    file_order,
+    format_date,
     format_duration,
     natural_key,
-    title_sort_key,
+    upload_key,
 )
 from .links import parse_input, search_url
 
@@ -323,14 +326,14 @@ class App(ctk.CTk):
 
         holder = tk.Frame(lst, bd=0, highlightthickness=0)
         holder.pack(fill="both", expand=True, padx=14, pady=4)
-        cols = ("n", "title", "length", "from", "status")
+        cols = ("n", "title", "uploaded", "length", "from", "status")
         self.tree = ttk.Treeview(holder, columns=cols, show="tree headings", selectmode="extended",
                                  style="YS.Treeview")
         self.tree.heading("#0", text="✓", anchor="center")
         self.tree.column("#0", width=44, minwidth=44, stretch=False, anchor="center")
-        heads = {"n": "#", "title": t("col_title"), "length": t("col_length"),
+        heads = {"n": "#", "title": t("col_title"), "uploaded": t("col_uploaded"), "length": t("col_length"),
                  "from": t("col_from"), "status": t("col_status")}
-        widths = {"n": (40, False), "title": (330, True), "length": (64, False),
+        widths = {"n": (40, False), "title": (330, True), "uploaded": (92, False), "length": (64, False),
                   "from": (120, True), "status": (210, True)}
         for col in cols:
             self.tree.heading(col, text=heads[col], anchor="w" if col in ("title", "from", "status") else "center")
@@ -443,13 +446,13 @@ class App(ctk.CTk):
         orow = ctk.CTkFrame(opts, fg_color="transparent")
         orow.pack(fill="x", padx=14, pady=(6, 3))
         ctk.CTkLabel(orow, text=t("order"), font=self.font(13)).pack(side="left", padx=(0, 8))
-        orders = {"list": t("order_list"), "az": t("order_az"), "za": t("order_za")}
-        self.order_seg = ctk.CTkSegmentedButton(
-            orow, values=list(orders.values()), font=self.font(12),
+        orders = {k: t(f"order_{k}") for k in ORDERS}
+        self.order_menu = self._menu(
+            orow, values=list(orders.values()), width=170,
             command=lambda lab: self.on_order(next(k for k, v in orders.items() if v == lab)))
         self.order_labels = orders
-        self.order_seg.set(orders.get(self.v["file_order"].get(), orders["list"]))
-        self.order_seg.pack(side="left")
+        self.order_menu.set(orders.get(self.v["file_order"].get(), orders["list"]))
+        self.order_menu.pack(side="left")
         self._check(opts, "numbered_files", "numbered")
         ctk.CTkLabel(opts, text=t("order_hint"), font=self.font(11), text_color=("gray40", "gray65"),
                      anchor="w", justify="left", wraplength=300).pack(fill="x", padx=(48, 10))
@@ -732,7 +735,8 @@ class App(ctk.CTk):
 
     def _row_values(self, n: int, e: Entry) -> tuple:
         status, detail = self.status_by_id.get(e.id, ("pending", ""))
-        return (n, e.title, format_duration(e.duration), e.source, self._status_text(status, detail))
+        return (n, e.title, format_date(e.extra.get("upload_date")), format_duration(e.duration), e.source,
+                self._status_text(status, detail))
 
     def _insert_row(self, n: int, e: Entry) -> None:
         status, _ = self.status_by_id.get(e.id, ("pending", ""))
@@ -891,10 +895,9 @@ class App(ctk.CTk):
     def apply_order(self) -> None:
         """Show the list in the file order chosen in step 3 (same rule as the job)."""
         how = self.v["file_order"].get() if "file_order" in self.v else "list"
-        if how in ("az", "za"):
-            self.entries.sort(key=lambda e: title_sort_key(e.title), reverse=(how == "za"))
-        else:
-            self.entries.sort(key=lambda e: e.extra.get("seq", 0))
+        self.entries.sort(key=lambda e: e.extra.get("seq", 0))
+        idx = file_order([e.title for e in self.entries], how, [upload_key(e.extra) for e in self.entries])
+        self.entries = [self.entries[i] for i in idx]
         self.refresh_tree()
 
     def on_order(self, how: str) -> None:
@@ -902,7 +905,7 @@ class App(ctk.CTk):
             self.set_status(t("busy"))
             return
         self.v["file_order"].set(how)
-        self.order_seg.set(self.order_labels.get(how, self.order_labels["list"]))
+        self.order_menu.set(self.order_labels.get(how, self.order_labels["list"]))
         self.apply_order()
 
     # ------------------------------------------------------------ step 1 actions
@@ -994,7 +997,7 @@ class App(ctk.CTk):
             remove_all_repeats=s.remove_all_repeats, remove_tags=s.remove_tags, save_docx=s.save_docx,
             save_txt=s.save_txt, save_srt=s.save_srt, save_combined_txt=s.save_combined_txt, save_csv=s.save_csv,
             output_name=s.output_name, docx=doc, video_quality=s.video_quality, numbered=s.numbered,
-            order=s.file_order if s.file_order in ("list", "az", "za") else "list",
+            order=s.file_order if s.file_order in ORDERS else "list",
             reuse_cache=s.reuse_cache, delay=max(0.0, float(s.delay)), workers=max(1, min(4, int(s.workers))),
         )
 
@@ -1352,7 +1355,7 @@ class App(ctk.CTk):
             for e in getattr(self, "job_entries", []):
                 if self.status_by_id.get(e.id, ("",))[0] == "working":
                     self.status_by_id[e.id] = ("pending", "")
-                    self._update_row(e.id)
+            self.apply_order()  # upload dates are known now: show them, settle a date order
         elif kind == "engine":
             version = str(data.get("version") or "")
             self._show_engine(version, Engine.version_age_days(version))

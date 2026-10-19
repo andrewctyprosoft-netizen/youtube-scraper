@@ -75,7 +75,8 @@ class FakeYtDlp:
     def info(self, vid, url):
         video = self.world[vid]
         track = lambda code: [{"ext": "vtt", "url": f"fake://{vid}/{code}"}]  # noqa: E731
-        return {"id": vid, "title": video["title"], "channel": "Chan", "upload_date": "20261015",
+        return {"id": vid, "title": video["title"], "channel": "Chan",
+                "upload_date": video.get("upload_date", "20261015"), "timestamp": video.get("timestamp"),
                 "duration": 75, "view_count": 10, "webpage_url": url, "language": video["language"],
                 "subtitles": {k: track(k) for k in video["subs"]},
                 "automatic_captions": {k: track(k) for k in video["auto"]},
@@ -387,6 +388,78 @@ def test_order_numbers_files_and_documents(engine, tmp_path, order, expected):
         rows = list(csv.reader(fh))[1:]
     assert [r[0] for r in rows] == ["1", "2", "3"]
     assert [r[1] for r in rows] == headings
+
+
+def test_file_order_by_upload_date():
+    titles = ["b", "a", "c", "d", "e"]
+    dates = [("20260301", 0), ("20250101", 0), ("", 0), ("20260301", 1772400000), ("20260301", 1772300000)]
+    # same day: the exact upload time decides; no date: list order, at the end either way
+    assert jobs.file_order(titles, "new", dates) == [3, 4, 0, 1, 2]
+    assert jobs.file_order(titles, "old", dates) == [1, 0, 4, 3, 2]
+    assert jobs.file_order(titles, "new", None) == [0, 1, 2, 3, 4]
+    assert jobs.upload_key({}) == ("", 0)
+
+
+DATED = {
+    "aaaaaaaaaa1": {**WORLD["aaaaaaaaaa1"], "upload_date": "20240105"},
+    "bbbbbbbbbb2": {**WORLD["bbbbbbbbbb2"], "upload_date": "20261015", "timestamp": 1792000000},
+    "dddddddddd4": {**WORLD["dddddddddd4"], "upload_date": "20261015", "timestamp": 1792090000},
+    "ccccccccccc": WORLD["ccccccccccc"],  # private: no date, goes last
+}
+
+
+@pytest.mark.parametrize("order,expected", [
+    ("new", ["001 - Rate limited once", "002 - English talk - part 1", "003 - Bản tin 15-10 - Hải Phòng"]),
+    ("old", ["001 - Bản tin 15-10 - Hải Phòng", "002 - English talk - part 1", "003 - Rate limited once"]),
+])
+def test_upload_date_order_numbers_every_file(tmp_path, order, expected):
+    fake = FakeYtDlp(DATED)
+    get = fake.get
+    fake.get = lambda url, timeout=30: b"\xff\xd8\xff\xe0jpeg" if url.endswith("thumb.jpg") else get(url, timeout)
+    engine = make_engine(fake, tmp_path)
+    ids = ["ccccccccccc", "aaaaaaaaaa1", "bbbbbbbbbb2", "dddddddddd4"]
+    ents = [Entry(i, i, f"https://www.youtube.com/watch?v={i}") for i in ids]
+    opts = JobOptions(out_dir=tmp_path, language="orig", delay=0, save_txt=True, numbered=True, order=order,
+                      want_video=True, want_thumbnail=True, output_name="Doc")
+    DownloadJob(engine, ents, opts, Recorder()).run()
+    assert sorted(p.stem for p in (tmp_path / "Transcripts").iterdir()) == expected
+    assert sorted(p.stem for p in (tmp_path / "Videos").iterdir()) == expected
+    assert sorted(p.stem for p in (tmp_path / "Thumbnails").iterdir()) == expected
+    with open(tmp_path / "Doc - list.csv", encoding="utf-8-sig") as fh:
+        rows = list(csv.reader(fh))[1:]
+    assert [r[0] for r in rows] == ["1", "2", "3", "4"]
+    assert rows[-1][2].endswith("ccccccccccc")  # the failed video has no date: last
+    # the list window reads the dates from the entries
+    assert {e.id: e.extra.get("upload_date") for e in ents}["aaaaaaaaaa1"] == "20240105"
+
+
+def test_upload_date_order_from_cache_and_on_stop(tmp_path):
+    fake = FakeYtDlp(DATED)
+    engine = make_engine(fake, tmp_path)
+    ids = ["aaaaaaaaaa1", "bbbbbbbbbb2"]
+    opts = JobOptions(out_dir=tmp_path, language="orig", delay=0, save_txt=True, numbered=True, order="new",
+                      save_csv=False)
+    DownloadJob(engine, entries(*ids), opts, Recorder()).run()
+    calls = len(fake.calls)
+    (tmp_path / "Transcripts").rename(tmp_path / "first")
+    DownloadJob(engine, entries(*ids), opts, Recorder()).run()  # every video from the cache
+    assert len(fake.calls) == calls
+    assert sorted(p.stem for p in (tmp_path / "Transcripts").iterdir()) == [
+        "001 - English talk - part 1", "002 - Bản tin 15-10 - Hải Phòng"]
+
+    # stopped half way: what finished is still written, numbered in date order
+    cancel = threading.Event()
+
+    def emit(kind, **data):
+        if kind == "row" and data["status"] == "done":
+            cancel.set()
+
+    out = tmp_path / "stopped"
+    opts = JobOptions(out_dir=out, language="orig", delay=0, save_txt=True, numbered=True, order="old",
+                      workers=1, save_csv=False)
+    with pytest.raises(Cancelled):
+        DownloadJob(engine, entries(*ids), opts, emit, cancel).run()
+    assert [p.stem for p in (out / "Transcripts").iterdir()] == ["001 - Bản tin 15-10 - Hải Phòng"]
 
 
 def test_numbers_widen_for_big_lists(engine, tmp_path):

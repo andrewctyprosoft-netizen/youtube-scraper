@@ -260,6 +260,7 @@ class Engine:
                     duration=item.get("duration"),
                     channel=item.get("channel") or item.get("uploader") or data.get("channel") or "",
                     source=name if (data.get("entries") is not None) else "",
+                    extra={k: item[k] for k in ("upload_date", "timestamp") if item.get(k)},
                 )
             )
         return entries

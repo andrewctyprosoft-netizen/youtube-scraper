@@ -33,6 +33,7 @@ STRINGS: dict[str, dict[str, str]] = {
     # --- list
     "list_title": {"en": "Videos", "vi": "Danh sách video"},
     "col_title": {"en": "Title", "vi": "Tiêu đề"},
+    "col_uploaded": {"en": "Uploaded", "vi": "Ngày đăng"},
     "col_length": {"en": "Length", "vi": "Thời lượng"},
     "col_from": {"en": "From", "vi": "Nguồn"},
     "col_status": {"en": "Status", "vi": "Trạng thái"},
@@ -211,9 +212,13 @@ STRINGS: dict[str, dict[str, str]] = {
     "order_list": {"en": "As listed", "vi": "Như danh sách"},
     "order_az": {"en": "Title A → Z", "vi": "Tên A → Z"},
     "order_za": {"en": "Title Z → A", "vi": "Tên Z → A"},
+    "order_new": {"en": "Newest first", "vi": "Mới nhất trước"},
+    "order_old": {"en": "Oldest first", "vi": "Cũ nhất trước"},
     "order_hint": {
-        "en": "Files are named after the video title. The order also sets the Word file and the list.",
-        "vi": "File được đặt theo tên video. Thứ tự này cũng áp dụng cho file Word và danh sách.",
+        "en": "Files are named after the video title. The order also sets the Word file and the list. "
+              "Upload dates are read when you press Start.",
+        "vi": "File được đặt theo tên video. Thứ tự này cũng áp dụng cho file Word và danh sách. "
+              "Ngày đăng được đọc khi bấm Bắt đầu.",
     },
     "reuse_cache": {
         "en": "Reuse captions already downloaded (faster, fewer requests)",
@@ -275,7 +280,7 @@ STRINGS: dict[str, dict[str, str]] = {
             "4. Choose the folder and press Start. When it finishes, click 'Open Word file' or 'Open folder'.\n\n"
             "TIPS\n\n"
             "• Auto-generated captions repeat every line; 'Remove repeated lines' cleans this up.\n"
-            "• Files are named after the video title. In step 3 choose the order (as listed, A → Z, Z → A) "
+            "• Files are named after the video title. In step 3 choose the order (as listed, A → Z, Z → A, newest or oldest first) "
             "and tick 'Number file names' to get 001, 002, … in that order.\n"
             "• Already have .srt files? Use the 'Combine my files' tab.\n"
             "• If downloads suddenly fail, go to Settings → Update engine. YouTube changes often.\n"

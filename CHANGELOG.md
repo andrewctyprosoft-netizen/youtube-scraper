@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.3.0 — 2026-10-19
+
+- Added: step 3 "Order" can sort by YouTube upload time: Newest first or Oldest first.
+  Upload dates are read when you press Start (the quick link list has none); videos of the same day go by their exact upload time, and videos without a date go last.
+  File numbers, the Word file, the combined text file and the CSV all follow it; numbered files are written once every date is known.
+- Added: "Uploaded" column in the video list; it fills in after a run and the list re-sorts to match the files.
+- Changed: "Order" is a drop-down instead of buttons, to fit five choices.
+
 ## 2.2.1 — 2026-10-16
 
 - Changed: English-only interface; the English / Tiếng Việt switch is gone.

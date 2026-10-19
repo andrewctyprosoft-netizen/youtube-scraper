@@ -4,7 +4,7 @@ A portable Windows app that gets transcripts, videos and audio from YouTube.
 Paste links, tick the videos you want, press Start.
 Built for people who never open a command prompt; English interface.
 
-Version 2.2.1 replaces the old set of yt-dlp commands and scripts (kept in `legacy/`).
+Version 2.3.0 replaces the old set of yt-dlp commands and scripts (kept in `legacy/`).
 
 ## Download
 
@@ -28,7 +28,7 @@ Released under the [MIT License](LICENSE).
 | One Word file | All transcripts in one `.docx`, video title as Heading 1, clickable contents, channel/date/link line |
 | Other outputs | TXT per video, clean SRT per video, one combined TXT, CSV list for Excel |
 | Video and audio | MP4 (best, 1080p, 720p, 480p, 360p), MP3 with cover art, thumbnails |
-| File names and order | Every file is named after the video title (TXT, SRT, MP4, MP3, JPG share one name); optional `001 - ` numbers in list order, title A → Z or Z → A, which also orders the Word file and CSV |
+| File names and order | Every file is named after the video title (TXT, SRT, MP4, MP3, JPG share one name); optional `001 - ` numbers in list order, title A → Z or Z → A, or upload date (newest or oldest first), which also orders the Word file and CSV |
 | Files you already have | "Combine my files" tab cleans `.srt` / `.vtt` / `.txt` files into one Word file |
 | Keeps working | "Update engine" button updates yt-dlp in place when YouTube changes |
 
@@ -53,7 +53,7 @@ Released under the [MIT License](LICENSE).
 
 ## Using the Portable App
 
-1. Unzip `YouTube-Scraper-2.2.1-win64.zip` anywhere (Desktop, USB stick).
+1. Unzip `YouTube-Scraper-2.3.0-win64.zip` anywhere (Desktop, USB stick).
 2. Double-click `YouTube Scraper.exe` inside the folder.
 3. Paste links, click "Add to list", choose what you want, press Start.
 
